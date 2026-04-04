@@ -1,0 +1,21 @@
+{
+    "name": "Proxy.Rig",
+    "rootNamespace": "Proxy",
+    "references": [
+        "GUID:324caed91501a9c47a04ebfd87b68794",
+        "GUID:d91d5ec20cf4bd541bb898f67497ca6d",
+        "GUID:d8b63aba1907145bea998dd612889d6b",
+        "GUID:2665a8d13d1b3f18800f46e256720795",
+        "GUID:a56e0566ad23cca4fb6af773576b990f",
+        "GUID:5b1474ab7fb331c4cb8dac21bc5f5ebb"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
