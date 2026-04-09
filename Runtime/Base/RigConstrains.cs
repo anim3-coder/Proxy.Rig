@@ -7,6 +7,7 @@ using Unity.Burst;
 using System.Collections.Generic;
 using System;
 using Unity.Collections.LowLevel.Unsafe;
+using Proxy.Collections;
 
 namespace Proxy.Rig
 {
@@ -14,7 +15,7 @@ namespace Proxy.Rig
     {
         public NativeArray<ConstrainsData> constrains;
         public NativeArray<Vector3> positions;
-        public NativeArray<int>[] dependeces;
+        public NativeJaggedArray<int> dependeces;
         private Transform[] constrainsTransformArray;
         private TransformAccessArray constrainsAccessArray;
 
@@ -25,7 +26,7 @@ namespace Proxy.Rig
             constrains = new NativeArray<ConstrainsData>(m_constrains.Length, Allocator.Persistent);
             constrainsTransformArray = new Transform[m_constrains.Length];
             positions = new NativeArray<Vector3>(m_constrains.Length, Allocator.Persistent);
-            dependeces = new NativeArray<int>[m_constrains.Length];
+            dependeces = new NativeJaggedArray<int>(m_constrains.Length, Allocator.Persistent);
             for (int i = 0; i < m_constrains.Length; i++)
             {
                 constrainsTransformArray[i] = m_constrains[i].transform;
@@ -33,7 +34,11 @@ namespace Proxy.Rig
             }
             for(int i = 0; i < m_constrains.Length; i++)
             {
-                dependeces[i] = m_constrains[i].GetDependenesIndices(this);
+                dependeces.AllocateRow(i, m_constrains[i].dependences.Length);
+                for(int x = 0; x < m_constrains[i].dependences.Length; x++)
+                {
+                    dependeces[i, x] = GetIndex(m_constrains[i].dependences[x]);
+                }
             }
 
             constrainsAccessArray = new TransformAccessArray(constrainsTransformArray);
@@ -60,8 +65,7 @@ namespace Proxy.Rig
             if (constrains.IsCreated) constrains.Dispose();
             if (constrainsAccessArray.isCreated) constrainsAccessArray.Dispose();
             if (positions.IsCreated) positions.Dispose();
-            for(int i = 0; i < dependeces.Length; i++)
-                dependeces[i].Dispose();
+            if (dependeces.IsCreated) dependeces.Dispose();
         }
 
         public void OnJobComplete()
@@ -79,7 +83,12 @@ namespace Proxy.Rig
             {
                 positions = positions,
             }.Schedule(constrainsAccessArray, dependsOn);
-            dependsOn = MultiPass(dependsOn, constrains.Length, ConstrainsUpdateJob);
+            dependsOn = new ConstrainsUpdate()
+            {
+                data = constrains,
+                indices = dependeces,
+                positions = positions,
+            }.Schedule(dependeces.Length, 8, dependsOn);
             dependsOn = new ConstrainsSet()
             {
                 data = constrains,
@@ -87,38 +96,14 @@ namespace Proxy.Rig
             return dependsOn;
         }
 
-        public JobHandle ConstrainsUpdateJob(int index, JobHandle dependsOn)
-        {
-            return new ConstrainsUpdate()
-            {
-                positions = positions,
-                data = constrains,
-                index = index,
-                indices = dependeces[index]
-            }.Schedule(dependsOn);
-        }
-
-        public JobHandle MultiPass(JobHandle dependsOn, int length, System.Func<int, JobHandle, JobHandle> Action)
-        {
-            NativeArray<JobHandle> jobs = new NativeArray<JobHandle>(length, Allocator.TempJob);
-            for (int i = 0; i < length; i++)
-            {
-                jobs[i] = Action.Invoke(i, dependsOn);
-            }
-            return jobs.Dispose(JobHandle.CombineDependencies(jobs));
-        }
-
         public static void SortByPostOrder(Constrains[] constraints)
         {
-            // Map each GameObject to its Constrains component for quick lookup
             var goToConstrains = new Dictionary<GameObject, Constrains>();
             foreach (var c in constraints)
                 goToConstrains[c.gameObject] = c;
 
-            // Set of all GameObjects that have a Constrains component
             var constrainedGOs = new HashSet<GameObject>(goToConstrains.Keys);
 
-            // Find roots: constrained objects whose parent is either null or not constrained
             var roots = new List<GameObject>();
             foreach (var go in constrainedGOs)
             {
@@ -127,12 +112,10 @@ namespace Proxy.Rig
                     roots.Add(go);
             }
 
-            // Perform post-order traversal on each root and collect components
             var sortedList = new List<Constrains>();
             foreach (var root in roots)
                 PostOrderTraverse(root, constrainedGOs, goToConstrains, sortedList);
-
-            // Overwrite the original array with the sorted order
+            
             for (int i = 0; i < sortedList.Count; i++)
                 constraints[i] = sortedList[i];
         }
@@ -142,29 +125,26 @@ namespace Proxy.Rig
                                               Dictionary<GameObject, Constrains> goToConstrains,
                                               List<Constrains> sortedList)
         {
-            // First, recursively process all constrained children
             foreach (Transform child in current.transform)
             {
                 if (constrainedGOs.Contains(child.gameObject))
                     PostOrderTraverse(child.gameObject, constrainedGOs, goToConstrains, sortedList);
             }
-            // Then add the current component
             sortedList.Add(goToConstrains[current]);
         }
 
         [BurstCompile]
-        public struct ConstrainsUpdate : IJob
+        public struct ConstrainsUpdate : IJobParallelFor
         {
-            [ReadOnly] public int index;
-            [ReadOnly] public NativeArray<int> indices;
+            [ReadOnly] public NativeJaggedArray<int> indices;
             [NativeDisableParallelForRestriction, NativeDisableContainerSafetyRestriction] public NativeArray<ConstrainsData> data;
             [ReadOnly] public NativeArray<Vector3> positions;
-            public void Execute()
+            public void Execute(int index)
             {
                 float distance;
                 ConstrainsData d = data[index];
                 Vector3 position = positions[index];
-                foreach (int i in indices)
+                for (int i = 0; i < indices.GetRowLength(index); i++)
                 {
                     distance = Vector3.Distance(position, positions[i]);
                     if (d.radius > distance)

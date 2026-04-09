@@ -1,7 +1,10 @@
 ﻿using System;
 using Proxy.Mesh;
+using Unity.Burst;
+using Unity.Collections;
 using Unity.Jobs;
 using UnityEngine;
+using static Proxy.Rig.Constrains;
 using static Proxy.Rig.Driver;
 
 namespace Proxy.Rig
@@ -47,6 +50,19 @@ namespace Proxy.Rig
         {
             Constrains.OnJobComplete();
             Drivers.OnJobComplete();
+        }
+
+        [BurstCompile]
+        public struct Clear : IJobParallelFor
+        {
+            public NativeArray<ConstrainsData> data;
+            public void Execute(int index)
+            {
+                var r = data[index];
+                r.internalPositionOffset = Vector3.zero;
+                r.internalRotationOffset = Quaternion.identity;
+                data[index] = r;
+            }
         }
     }
 }
